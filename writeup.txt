@@ -1,0 +1,125 @@
+# Assignment 1 Writeup
+
+## 1. Data Overview
+
+### Dataset Sizes
+- train_Interactions.csv.gz: ~200k interactions
+- train_Category.json.gz: Training reviews with category labels
+- test_Category.json.gz: Test reviews (no labels)
+- pairs_Read.csv, pairs_Category.csv, pairs_Rating.csv: Evaluation pairs
+
+### Preprocessing Steps
+- Loaded compressed CSV/JSON files with schema validation
+- Handled missing values (dropped rows with NaN in critical columns)
+- Standardized column names (userID/user_id, itemID/item_id)
+- Cached preprocessed data as parquet for faster iteration
+
+## 2. Feature Engineering
+
+### Read Task Features
+- User statistics: mean rating, interaction count, user bias (deviation from global mean)
+- Item statistics: mean rating, interaction count, item bias, popularity score
+- Global mean rating
+- Matrix factorization inputs: user/item ID mappings, sparse interaction matrix
+
+### Category Task Features
+- Text preprocessing: lowercase, strip, normalize whitespace
+- TF-IDF vectorization: word-level 1-2 n-grams, max_features=200000
+- Optional: SentenceTransformer embeddings (all-MiniLM-L6-v2)
+
+### Rating Task Features
+- User/item bias terms (deviation from global mean)
+- User/item interaction counts
+- Mean ratings per user/item
+- Popularity features
+
+## 3. Models
+
+### Read Prediction
+- Baseline: Logistic regression on collaborative features
+- Class weighting: balanced (handles imbalanced read/not-read)
+- Probability calibration: Isotonic calibration for better probability estimates
+- Optional: Implicit matrix factorization (not fully integrated in final version)
+
+### Category Classification
+- Model: Multinomial logistic regression on TF-IDF features
+- Class weighting: balanced (handles imbalanced genre distribution)
+- Regularization: C=1.0 (L2 penalty)
+- Alternative: LinearSVC (optional, not used in final)
+
+### Rating Regression
+- Baseline: Global mean + user/item bias terms
+- Model: XGBoost regressor (n_estimators=100, max_depth=6, learning_rate=0.1)
+- Fallback: sklearn GradientBoostingRegressor if XGBoost unavailable
+- Predictions clipped to [1.0, 5.0] range
+
+## 4. Validation Strategy
+
+### Cross-Validation Setup
+- K-fold cross-validation (default: 5 folds)
+- Stratified splits for read/category tasks (balanced class distribution)
+- Random splits with seed control for reproducibility
+- Time-aware splits available for temporal data (not used in final)
+
+### Metrics
+- Read: Balanced accuracy (average of per-class recall)
+- Category: Multi-class accuracy
+- Rating: Mean Squared Error (MSE), RMSE, MAE
+
+### Hyperparameter Selection
+- Grid search over key hyperparameters
+- Selected best parameters based on CV scores
+- Logged all experiments to results/experiments.csv
+
+## 5. Results
+
+### Cross-Validation Scores
+[To be filled from experiments.csv]
+
+### Leaderboard Performance
+[To be filled after submission]
+
+### Comparison to Baselines
+[To be filled after running baselines.py]
+
+## 6. Key Decisions
+
+### Why Chosen Features/Models
+- Collaborative features (user/item stats) capture popularity and user preferences
+- TF-IDF for text: simple, interpretable, works well for genre classification
+- XGBoost for rating: handles non-linear interactions, robust to outliers
+- Bias terms: capture systematic user/item effects
+
+### Trade-offs Considered
+- TF-IDF vs embeddings: TF-IDF chosen for speed and interpretability
+- Logistic vs XGBoost for read: Logistic chosen for speed, XGBoost for rating (more complex task)
+- Calibration: Added for read task to improve probability estimates
+
+### Lessons Learned
+- Feature engineering crucial: user/item biases significantly improve rating predictions
+- Class balancing important: balanced accuracy better than raw accuracy for imbalanced tasks
+- Caching essential: parquet cache speeds up iteration significantly
+
+## 7. Reproduction
+
+### Environment Setup
+```bash
+python -m venv .venv
+.venv\Scripts\activate  # Windows
+pip install -r requirements.txt
+```
+
+### Random Seed
+- Fixed seed: 42 (for reproducibility)
+
+### Commands to Regenerate Predictions
+```bash
+python assignment1.py --task all --seed 42
+```
+
+### Environment Details
+- Python version: 3.14.0
+- Key packages: pandas, numpy, scikit-learn, xgboost, implicit, sentence-transformers
+- See requirements.txt for full list
+
+
