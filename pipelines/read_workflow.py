@@ -1,11 +1,9 @@
 """Pipeline orchestrator for read prediction workflow."""
 
-from typing import Optional
-
 import numpy as np
 import pandas as pd
 
-from config.settings import ReadConfig, Settings
+from config.settings import Settings
 from constants import FileNames, InteractionColumns, PairColumns
 from data_access.loader import load_interactions, load_pairs
 from features.interactions import InteractionFeatureBuilder
@@ -48,33 +46,42 @@ def run_read_workflow(
             data_dir=data_dir, filename=FileNames.PAIRS_READ
         )
 
-        # Build features
-        logger.info("Building interaction features")
+        # Build features and implicit matrix
+        logger.info("Building interaction features and implicit matrix")
         feature_builder = InteractionFeatureBuilder(
             random_seed=settings.experiment.random_seed
         )
         feature_builder.fit(train_df)
 
-        # For read prediction, use popularity-based approach
-        # Since all training interactions are "read", we predict based on item popularity
-        logger.info("Computing popularity-based read predictions")
-        
-        # Compute item popularity (fraction of total reads)
+        interaction_matrix, user_to_idx, item_to_idx = feature_builder.build_sparse_matrix(
+            train_df
+        )
+
+        # Popularity prior (fraction of total reads)
         item_counts = train_df[InteractionColumns.ITEM_ID].value_counts()
         total_reads = len(train_df)
         item_popularity = item_counts / total_reads
-        
-        # For pairs, predict based on item popularity
-        # Use popularity score as probability (normalized to [0, 1])
-        pair_item_ids = pairs_df[PairColumns.ITEM_ID]
-        predictions = pair_item_ids.map(item_popularity).fillna(0.0).values
-        
-        # Normalize to ensure [0, 1] range
-        if predictions.max() > 0:
-            predictions = predictions / predictions.max()
-        
-        # Clip to [0, 1]
-        predictions = np.clip(predictions, 0.0, 1.0)
+
+        # Train implicit read predictor
+        predictor = ReadPredictor(
+            use_implicit=settings.read.use_implicit,
+            n_factors=settings.read.n_factors,
+            n_iterations=settings.read.n_iterations,
+            regularization=settings.read.als_regularization,
+            popularity_weight=settings.read.popularity_weight,
+            random_seed=settings.experiment.random_seed,
+        )
+        predictor.fit(
+            interaction_matrix,
+            user_to_idx=user_to_idx,
+            item_to_idx=item_to_idx,
+            item_popularity=item_popularity,
+        )
+
+        # Generate blended implicit + popularity predictions
+        predictions = predictor.predict_proba_pairs(
+            pairs_df[PairColumns.USER_ID], pairs_df[PairColumns.ITEM_ID]
+        )
 
         # Build submission DataFrame
         submission_df = pd.DataFrame(
