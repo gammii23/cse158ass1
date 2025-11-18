@@ -90,7 +90,7 @@ class Settings:
     read_popularity_weight: float = 0.35
     
     # Category classification
-    category_max_features: int = 5000
+    category_max_features: int = 100000
     category_C: float = 1.0
     category_class_weight: Optional[str] = "balanced"
     
@@ -447,6 +447,19 @@ class RatingRegressor:
         self.model: Optional[Any] = None
         self._is_fitted = False
     
+    def _compute_baseline(self, user_ids: Optional[pd.Series], item_ids: Optional[pd.Series]) -> np.ndarray:
+        """Compute baseline prediction from global, user, and item biases."""
+        n_samples = len(user_ids) if user_ids is not None else len(item_ids)
+        baseline = np.full(n_samples, self.global_mean, dtype=float)
+
+        if self.use_bias:
+            if user_ids is not None:
+                baseline += user_ids.map(self.user_biases).fillna(0.0).values
+            if item_ids is not None:
+                baseline += item_ids.map(self.item_biases).fillna(0.0).values
+
+        return baseline
+
     def fit(self, X_features: pd.DataFrame, y: np.ndarray,
             user_ids: Optional[pd.Series] = None, item_ids: Optional[pd.Series] = None) -> "RatingRegressor":
         """Fit regressor."""
@@ -485,7 +498,10 @@ class RatingRegressor:
                 random_state=self.random_state,
             )
         
-        self.model.fit(X_features, y)
+        baseline = self._compute_baseline(user_ids, item_ids) if user_ids is not None and item_ids is not None else np.full(len(y), self.global_mean, dtype=float)
+        residuals = y - baseline
+
+        self.model.fit(X_features, residuals)
         self._is_fitted = True
         logger.info("Rating regressor fitted successfully")
         return self
@@ -496,13 +512,10 @@ class RatingRegressor:
         if not self._is_fitted or self.model is None:
             raise ValueError("Must call fit() first")
         
-        predictions = self.model.predict(X_features)
-        
-        if self.use_bias and user_ids is not None and item_ids is not None:
-            user_bias = user_ids.map(self.user_biases).fillna(0.0).values
-            item_bias = item_ids.map(self.item_biases).fillna(0.0).values
-            predictions = predictions + user_bias + item_bias
-        
+        baseline = self._compute_baseline(user_ids, item_ids) if user_ids is not None and item_ids is not None else np.full(len(X_features), self.global_mean, dtype=float)
+        residual_predictions = self.model.predict(X_features)
+        predictions = baseline + residual_predictions
+
         return np.clip(predictions, 1.0, 5.0)
 
 # ============================================================================
