@@ -53,6 +53,8 @@ class ReadConfig:
     n_factors: int = 50
     n_iterations: int = 10
     learning_rate: float = 0.01
+    als_regularization: float = 0.1
+    popularity_weight: float = 0.35
 
     # Calibration
     calibrate_probs: bool = True
